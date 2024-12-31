@@ -5,14 +5,16 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
+#define DEBUG_MODE 0
 #define BUFFER_SIZE 1024
-#define INITIAL_BUFFER_SIZE 1024
+#define MAX_BUFFER_SIZE 4096
 #define USAGE_MESSAGE "Usage: client [-r n <pr1=value1 pr2=value2 ...>] <URL>\n"
 
 void handle_error(const char *message);
 void parse_url(const char *url, char *host, int *port, char *path);
 void http_request(char *request, const char *host, const char *path, const char *params);
 void check_parameters(int param_count, char **params);
+void save_image_file(const unsigned char *data, size_t size, const char *prefix);
 
 int main(int argc, char *argv[]) {
     char *url = NULL;
@@ -110,11 +112,17 @@ int main(int argc, char *argv[]) {
 
     full_response[total_response_size] = '\0';
     printf("\nTotal received response bytes: %zd\n", total_response_size);
-    printf("Response Content:\n%s\n", full_response);
+    for (size_t i = 0; i < total_response_size; i++) {
+        printf("%c", full_response[i]); // Print each character
+    }
 
     if (bytes_received < 0)
         handle_error("recv");
 
+    if(DEBUG_MODE == 1){
+        save_image_file(full_response, total_response_size, "downloaded_image");
+    }
+    
     if (strstr((char*)full_response, "HTTP/1.1 3") != NULL) {
         char *location_header = strstr((char*)full_response, "Location: ");
         if (location_header != NULL) {
@@ -197,5 +205,37 @@ void check_parameters(int param_count, char **params) {
             printf(USAGE_MESSAGE);
             exit(EXIT_FAILURE);
         }
+    }
+}
+// if DEBUG_MODE is enabled, save the image file to the current directory
+void save_image_file(const unsigned char* data, size_t size, const char* prefix) {
+    // Find the start of the actual image data (after HTTP headers)
+    const char* image_start = strstr((const char*)data, "\r\n\r\n");
+    if (image_start == NULL) {
+        fprintf(stderr, "Could not find image data start\n");
+        return;
+    }
+
+    // Skip the header delimiter
+    image_start += 4;
+    size_t image_size = size - (image_start - (const char*)data);
+
+    static int file_counter = 0;
+    char filename[256];
+    snprintf(filename, sizeof(filename), "%s_%d.jpg", prefix, file_counter++);
+
+    FILE* file = fopen(filename, "wb");
+    if (file == NULL) {
+        perror("Failed to open image file");
+        return;
+    }
+
+    size_t written = fwrite(image_start, 1, image_size, file);
+    fclose(file);
+
+    if (written != image_size) {
+        fprintf(stderr, "Warning: Incomplete write to %s\n", filename);
+    } else {
+        printf("Saved image file: %s (Size: %zd bytes)\n", filename, image_size);
     }
 }
